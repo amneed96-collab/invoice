@@ -869,7 +869,8 @@ function Login({
   const [err, setErr] = useState('');
   const submit = e => {
     e.preventDefault();
-    if (pw === (admin?.password || '1234')) {
+    const storedPw = String(admin?.password ?? '1234').trim();
+    if (pw.trim() === storedPw) {
       onSuccess();
     } else setErr('Incorrect password. Please try again.');
   };
@@ -2154,7 +2155,7 @@ function AdminPage({
     setTimeout(() => setMsg(''), 2500);
   };
   const changePw = async () => {
-    if (pwForm.current !== admin.password) return alert('Current password is incorrect.');
+    if (String(pwForm.current).trim() !== String(admin.password).trim()) return alert('Current password is incorrect.');
     if (!pwForm.next || pwForm.next.length < 4) return alert('New password must be at least 4 characters.');
     if (pwForm.next !== pwForm.confirm) return alert('New passwords do not match.');
     await persist.admin({
