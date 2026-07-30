@@ -86,10 +86,12 @@
   .badge.delivered{background:var(--accent-bg);color:var(--accent);}
   .badge.cancelled{background:var(--danger-bg);color:var(--danger);}
   .scrollx{overflow-x:auto;}
+  .print-only{display:none;}
   @media print{
     body *{visibility:hidden;}
-    #invoice-print, #invoice-print *{visibility:visible;}
-    #invoice-print{position:absolute;top:0;left:0;width:210mm;}
+    .print-area, .print-area *{visibility:visible;}
+    .print-area{position:absolute;top:0;left:0;width:210mm;}
+    .print-only{display:block !important;}
     .no-print{display:none !important;}
   }
 </style>
@@ -1783,6 +1785,33 @@ function PurchasePage({
 /* ================= CUSTOMERS ================= */
 function CustomersPage({
   customers,
+  invoices,
+  persist
+}) {
+  const [tab, setTab] = useState('list');
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: tab === 'list' ? 'primary' : 'ghost',
+    onClick: () => setTab('list')
+  }, "Customer list"), /*#__PURE__*/React.createElement("button", {
+    className: tab === 'due' ? 'primary' : 'ghost',
+    onClick: () => setTab('due')
+  }, "Customer due")), tab === 'list' ? /*#__PURE__*/React.createElement(CustomerListPage, {
+    customers: customers,
+    persist: persist
+  }) : /*#__PURE__*/React.createElement(CustomerDuePage, {
+    customers: customers,
+    invoices: invoices,
+    persist: persist
+  }));
+}
+function CustomerListPage({
+  customers,
   persist
 }) {
   const [form, setForm] = useState(blank());
@@ -1949,6 +1978,147 @@ function CustomersPage({
     name: "trash",
     size: 14
   }))))))))));
+}
+function CustomerDuePage({
+  customers,
+  invoices,
+  persist
+}) {
+  const [collectingId, setCollectingId] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [q, setQ] = useState('');
+  const dueByCustomer = useMemo(() => {
+    const map = {};
+    invoices.forEach(inv => {
+      const due = Number(inv.due || 0);
+      if (due <= 0) return;
+      const key = inv.custId || inv.mobile || inv.shopName;
+      if (!map[key]) map[key] = {
+        custId: inv.custId,
+        shopName: inv.shopName,
+        mobile: inv.mobile,
+        totalDue: 0,
+        invoices: []
+      };
+      map[key].totalDue += due;
+      map[key].invoices.push(inv);
+    });
+    return Object.values(map).filter(r => r.totalDue > 0).sort((a, b) => b.totalDue - a.totalDue);
+  }, [invoices]);
+  const filtered = dueByCustomer.filter(r => (r.shopName + r.mobile).toLowerCase().includes(q.toLowerCase()));
+  const totalAllDue = dueByCustomer.reduce((s, r) => s + r.totalDue, 0);
+  const collect = async row => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) return alert('Enter a valid collection amount.');
+    if (amt > row.totalDue) return alert('Amount cannot be more than the total due (' + money(row.totalDue) + ').');
+    let remaining = amt;
+    const sortedInvoices = [...row.invoices].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const updatedIds = {};
+    sortedInvoices.forEach(inv => {
+      if (remaining <= 0) return;
+      const due = Number(inv.due || 0);
+      if (due <= 0) return;
+      const pay = Math.min(due, remaining);
+      updatedIds[inv.id] = {
+        paid: Number(inv.paid || 0) + pay,
+        due: due - pay
+      };
+      remaining -= pay;
+    });
+    const updatedInvoices = invoices.map(inv => updatedIds[inv.id] ? {
+      ...inv,
+      ...updatedIds[inv.id]
+    } : inv);
+    await persist.invoices(updatedInvoices);
+    setCollectingId(null);
+    setAmount('');
+  };
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 14,
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: 'var(--muted)'
+    }
+  }, "Total outstanding due: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: 'var(--danger)'
+    }
+  }, money(totalAllDue))), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Search customer...",
+    value: q,
+    onChange: e => setQ(e.target.value),
+    style: {
+      maxWidth: 220
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, filtered.length === 0 ? /*#__PURE__*/React.createElement(Empty, {
+    text: "No customers with due amount."
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "scrollx"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Shop"), /*#__PURE__*/React.createElement("th", null, "Mobile"), /*#__PURE__*/React.createElement("th", null, "Total due"), /*#__PURE__*/React.createElement("th", null, "Invoices"), /*#__PURE__*/React.createElement("th", null, "Collect payment"))), /*#__PURE__*/React.createElement("tbody", null, filtered.map(row => /*#__PURE__*/React.createElement("tr", {
+    key: row.custId || row.mobile
+  }, /*#__PURE__*/React.createElement("td", null, row.shopName), /*#__PURE__*/React.createElement("td", null, row.mobile), /*#__PURE__*/React.createElement("td", {
+    className: "tabular",
+    style: {
+      color: 'var(--danger)',
+      fontWeight: 600
+    }
+  }, money(row.totalDue)), /*#__PURE__*/React.createElement("td", null, row.invoices.length), /*#__PURE__*/React.createElement("td", {
+    style: {
+      minWidth: 220
+    }
+  }, collectingId === (row.custId || row.mobile) ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    placeholder: "Amount",
+    value: amount,
+    onChange: e => setAmount(e.target.value),
+    style: {
+      maxWidth: 110
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "accent",
+    style: {
+      padding: '6px 10px'
+    },
+    onClick: () => collect(row)
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    style: {
+      padding: '6px 10px'
+    },
+    onClick: () => {
+      setCollectingId(null);
+      setAmount('');
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "x",
+    size: 13
+  }))) : /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    style: {
+      fontSize: 12.5,
+      padding: '6px 10px'
+    },
+    onClick: () => {
+      setCollectingId(row.custId || row.mobile);
+      setAmount('');
+    }
+  }, "Collect payment")))))))));
 }
 
 /* ================= EXPENSES ================= */
@@ -2269,21 +2439,42 @@ function ReportPage({
   invoices,
   purchases,
   expenses,
-  products
+  products,
+  admin
 }) {
   const [period, setPeriod] = useState('daily');
   const [view, setView] = useState('sales');
-  const now = new Date();
+  const todayStr = todayISO();
+  const currentYear = Number(todayStr.slice(0, 4));
+  const currentMonth = todayStr.slice(0, 7);
+  const [weekStart, setWeekStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return d.toISOString().slice(0, 10);
+  });
+  const [weekEnd, setWeekEnd] = useState(todayStr);
+  const [monthValue, setMonthValue] = useState(currentMonth); // format YYYY-MM
+  const [yearValue, setYearValue] = useState(String(currentYear));
+  const yearOptions = useMemo(() => {
+    const years = new Set([currentYear]);
+    invoices.forEach(i => {
+      if (i.date) years.add(Number(String(i.date).slice(0, 4)));
+    });
+    purchases.forEach(p => {
+      if (p.date) years.add(Number(String(p.date).slice(0, 4)));
+    });
+    expenses.forEach(e => {
+      if (e.date) years.add(Number(String(e.date).slice(0, 4)));
+    });
+    return Array.from(years).filter(y => !isNaN(y)).sort((a, b) => b - a);
+  }, [invoices, purchases, expenses, currentYear]);
   const inRange = dateStr => {
     if (!dateStr) return false;
-    const d = new Date(dateStr);
-    if (period === 'daily') return dateStr === todayISO();
-    if (period === 'weekly') {
-      const diff = (now - d) / (1000 * 3600 * 24);
-      return diff >= 0 && diff < 7;
-    }
-    if (period === 'monthly') return String(dateStr).slice(0, 7) === todayISO().slice(0, 7);
-    if (period === 'yearly') return String(dateStr).slice(0, 4) === todayISO().slice(0, 4);
+    const ds = String(dateStr).slice(0, 10);
+    if (period === 'daily') return ds === todayStr;
+    if (period === 'weekly') return ds >= weekStart && ds <= weekEnd;
+    if (period === 'monthly') return ds.slice(0, 7) === monthValue;
+    if (period === 'yearly') return ds.slice(0, 4) === yearValue;
     return false;
   };
   const salesInRange = invoices.filter(i => inRange(i.date));
@@ -2318,22 +2509,105 @@ function ReportPage({
   const productRows = Object.values(productMap).sort((a, b) => b.amount - a.amount);
   const periods = [['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly'], ['yearly', 'Yearly']];
   const views = [['sales', 'Product-wise & all'], ['stock', 'Stock report'], ['pnl', 'Profit and loss']];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthYear = Number(monthValue.slice(0, 4));
+  const monthNum = Number(monthValue.slice(5, 7));
+  const periodLabel = (() => {
+    if (period === 'daily') return 'Daily — ' + fmtDate(todayStr);
+    if (period === 'weekly') return 'Weekly — ' + fmtDate(weekStart) + ' to ' + fmtDate(weekEnd);
+    if (period === 'monthly') return 'Monthly — ' + (monthNames[monthNum - 1] || '') + ' ' + monthYear;
+    if (period === 'yearly') return 'Yearly — ' + yearValue;
+    return '';
+  })();
+  const viewLabel = views.find(v => v[0] === view)?.[1] || '';
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
       marginBottom: 12,
       flexWrap: 'wrap'
-    }
+    },
+    className: "no-print"
   }, periods.map(([id, label]) => /*#__PURE__*/React.createElement("button", {
     key: id,
     onClick: () => setPeriod(id),
     className: period === id ? 'primary' : 'ghost'
-  }, label))), /*#__PURE__*/React.createElement("div", {
+  }, label))), period === 'weekly' && /*#__PURE__*/React.createElement("div", {
+    className: "card no-print",
+    style: {
+      marginBottom: 14,
+      display: 'flex',
+      gap: 14,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Start date"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: weekStart,
+    onChange: e => setWeekStart(e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "End date"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: weekEnd,
+    onChange: e => setWeekEnd(e.target.value)
+  }))), period === 'monthly' && /*#__PURE__*/React.createElement("div", {
+    className: "card no-print",
+    style: {
+      marginBottom: 14,
+      display: 'flex',
+      gap: 14,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Year"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: monthYear,
+    onChange: e => setMonthValue(e.target.value + '-' + String(monthNum).padStart(2, '0'))
+  }, yearOptions.map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Month"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: monthNum,
+    onChange: e => setMonthValue(monthYear + '-' + String(e.target.value).padStart(2, '0'))
+  }, monthNames.map((m, idx) => /*#__PURE__*/React.createElement("option", {
+    key: m,
+    value: idx + 1
+  }, m))))), period === 'yearly' && /*#__PURE__*/React.createElement("div", {
+    className: "card no-print",
+    style: {
+      marginBottom: 14,
+      display: 'flex',
+      gap: 14,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Year"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: yearValue,
+    onChange: e => setYearValue(e.target.value)
+  }, yearOptions.map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
       marginBottom: 16,
+      flexWrap: 'wrap',
+      justifyContent: 'space-between'
+    },
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
       flexWrap: 'wrap'
     }
   }, views.map(([id, label]) => /*#__PURE__*/React.createElement("button", {
@@ -2343,7 +2617,13 @@ function ReportPage({
     style: {
       fontSize: 13
     }
-  }, label))), view === 'sales' && /*#__PURE__*/React.createElement("div", {
+  }, label))), /*#__PURE__*/React.createElement("button", {
+    className: "primary",
+    onClick: () => window.print()
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "print",
+    size: 14
+  }), " Print report")), view === 'sales' && /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2453,7 +2733,142 @@ function ReportPage({
       paddingTop: 10,
       color: netProfit >= 0 ? 'var(--accent)' : 'var(--danger)'
     }
-  }, money(netProfit)))))));
+  }, money(netProfit)))))), /*#__PURE__*/React.createElement("div", {
+    className: "print-area print-only"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10mm',
+      fontFamily: "'Inter',sans-serif",
+      color: '#1a1a1a'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      paddingBottom: 12,
+      borderBottom: '2.5px solid #1B2E4B',
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Source Serif 4',serif",
+      fontWeight: 700,
+      fontSize: 20,
+      color: '#1B2E4B'
+    }
+  }, admin?.name || 'Shop name'), admin?.address && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#555'
+    }
+  }, admin.address)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'right'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 17,
+      fontWeight: 700,
+      color: '#1B2E4B'
+    }
+  }, "REPORT — ", viewLabel), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#555'
+    }
+  }, periodLabel), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#888'
+    }
+  }, "Generated: ", fmtDate(new Date())))), view === 'sales' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 24,
+      marginBottom: 14,
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, "Total sales:"), " ", money(totalSales)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, "Total discount:"), " ", money(totalDiscount)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, "Total invoices:"), " ", salesInRange.length)), /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      borderBottom: '2px solid #1B2E4B'
+    }
+  }, /*#__PURE__*/React.createElement("th", null, "Product"), /*#__PURE__*/React.createElement("th", null, "Qty sold"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Total sales"))), /*#__PURE__*/React.createElement("tbody", null, productRows.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.name
+  }, /*#__PURE__*/React.createElement("td", null, r.name), /*#__PURE__*/React.createElement("td", null, r.qty), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, money(r.amount))))))), view === 'stock' && /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      borderBottom: '2px solid #1B2E4B'
+    }
+  }, /*#__PURE__*/React.createElement("th", null, "Product"), /*#__PURE__*/React.createElement("th", null, "Category"), /*#__PURE__*/React.createElement("th", null, "Stock"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Stock value"))), /*#__PURE__*/React.createElement("tbody", null, products.map(p => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, p.name), /*#__PURE__*/React.createElement("td", null, p.category), /*#__PURE__*/React.createElement("td", null, p.stock), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, money(Number(p.purchasePrice || 0) * Number(p.stock || 0))))))), view === 'pnl' && /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      maxWidth: 460
+    }
+  }, /*#__PURE__*/React.createElement("tbody", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Total sales"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, money(totalSales))), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Sales discount"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "- ", money(totalDiscount))), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Cost of goods sold (COGS)"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "- ", money(cogs))), /*#__PURE__*/React.createElement("tr", {
+    style: {
+      fontWeight: 700
+    }
+  }, /*#__PURE__*/React.createElement("td", null, "Gross profit"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, money(grossProfit))), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Expenses"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "- ", money(totalExpense))), /*#__PURE__*/React.createElement("tr", {
+    style: {
+      fontWeight: 700,
+      borderTop: '2px solid #1B2E4B'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      paddingTop: 8
+    }
+  }, "Net profit"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      paddingTop: 8
+    }
+  }, money(netProfit))))))));
 }
 function MiniStat({
   label,
@@ -2945,6 +3360,7 @@ function InvoiceView({
     size: 14
   }), " Print")), /*#__PURE__*/React.createElement("div", {
     id: "invoice-print",
+    className: "print-area",
     style: {
       background: '#fff',
       width: '210mm',
