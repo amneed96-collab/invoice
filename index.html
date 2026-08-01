@@ -1987,6 +1987,8 @@ function CustomerDuePage({
   const [collectingId, setCollectingId] = useState(null);
   const [amount, setAmount] = useState('');
   const [q, setQ] = useState('');
+  const [selectedShopKey, setSelectedShopKey] = useState('');
+  const [invAmounts, setInvAmounts] = useState({});
   const dueByCustomer = useMemo(() => {
     const map = {};
     invoices.forEach(inv => {
@@ -1994,6 +1996,7 @@ function CustomerDuePage({
       if (due <= 0) return;
       const key = inv.custId || inv.mobile || inv.shopName;
       if (!map[key]) map[key] = {
+        key,
         custId: inv.custId,
         shopName: inv.shopName,
         mobile: inv.mobile,
@@ -2007,6 +2010,7 @@ function CustomerDuePage({
   }, [invoices]);
   const filtered = dueByCustomer.filter(r => (r.shopName + r.mobile).toLowerCase().includes(q.toLowerCase()));
   const totalAllDue = dueByCustomer.reduce((s, r) => s + r.totalDue, 0);
+  const selectedRow = dueByCustomer.find(r => r.key === selectedShopKey);
   const collect = async row => {
     const amt = Number(amount);
     if (!amt || amt <= 0) return alert('Enter a valid collection amount.');
@@ -2033,13 +2037,139 @@ function CustomerDuePage({
     setCollectingId(null);
     setAmount('');
   };
+  const collectInvoice = async inv => {
+    const amt = Number(invAmounts[inv.id]);
+    const due = Number(inv.due || 0);
+    if (!amt || amt <= 0) return alert('Enter a valid amount.');
+    if (amt > due) return alert('Amount cannot be more than this invoice\'s due (' + money(due) + ').');
+    const updatedInvoices = invoices.map(i => i.id === inv.id ? {
+      ...i,
+      paid: Number(i.paid || 0) + amt,
+      due: due - amt
+    } : i);
+    await persist.invoices(updatedInvoices);
+    setInvAmounts({
+      ...invAmounts,
+      [inv.id]: ''
+    });
+  };
+  const collectInvoiceFull = async inv => {
+    const due = Number(inv.due || 0);
+    const updatedInvoices = invoices.map(i => i.id === inv.id ? {
+      ...i,
+      paid: Number(i.paid || 0) + due,
+      due: 0
+    } : i);
+    await persist.invoices(updatedInvoices);
+  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      marginTop: 0,
+      fontSize: 15
+    }
+  }, "Due collection by shop"), /*#__PURE__*/React.createElement(Field, {
+    label: "Select shop"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: selectedShopKey,
+    onChange: e => setSelectedShopKey(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "-- Select a shop --"), dueByCustomer.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r.key,
+    value: r.key
+  }, r.shopName, " (", r.mobile, ") — Due ", money(r.totalDue))))), selectedRow && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+      flexWrap: 'wrap',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14
+    }
+  }, /*#__PURE__*/React.createElement("b", null, selectedRow.shopName), " · ", selectedRow.mobile, " — Total due: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: 'var(--danger)'
+    }
+  }, money(selectedRow.totalDue)))), /*#__PURE__*/React.createElement("div", {
+    className: "scrollx"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Invoice"), /*#__PURE__*/React.createElement("th", null, "Date"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Paid"), /*#__PURE__*/React.createElement("th", null, "Due"), /*#__PURE__*/React.createElement("th", null, "Collect (partial)"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, selectedRow.invoices.map(inv => /*#__PURE__*/React.createElement("tr", {
+    key: inv.id
+  }, /*#__PURE__*/React.createElement("td", null, inv.no), /*#__PURE__*/React.createElement("td", null, fmtDate(inv.date)), /*#__PURE__*/React.createElement("td", {
+    className: "tabular"
+  }, money(inv.total)), /*#__PURE__*/React.createElement("td", {
+    className: "tabular"
+  }, money(inv.paid)), /*#__PURE__*/React.createElement("td", {
+    className: "tabular",
+    style: {
+      color: 'var(--danger)',
+      fontWeight: 600
+    }
+  }, money(inv.due)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      minWidth: 130
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    placeholder: "Amount",
+    value: invAmounts[inv.id] || '',
+    onChange: e => setInvAmounts({
+      ...invAmounts,
+      [inv.id]: e.target.value
+    }),
+    style: {
+      maxWidth: 110
+    }
+  })), /*#__PURE__*/React.createElement("td", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "accent",
+    style: {
+      padding: '6px 10px',
+      marginRight: 6,
+      fontSize: 12.5
+    },
+    onClick: () => collectInvoice(inv)
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    style: {
+      padding: '6px 10px',
+      fontSize: 12.5
+    },
+    onClick: () => collectInvoiceFull(inv)
+  }, "Pay full"))))))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
       marginBottom: 14,
       gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      margin: 0,
+      fontSize: 15
+    }
+  }, "All customers with due"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
       flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -2058,14 +2188,14 @@ function CustomerDuePage({
     style: {
       maxWidth: 220
     }
-  })), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, filtered.length === 0 ? /*#__PURE__*/React.createElement(Empty, {
     text: "No customers with due amount."
   }) : /*#__PURE__*/React.createElement("div", {
     className: "scrollx"
   }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Shop"), /*#__PURE__*/React.createElement("th", null, "Mobile"), /*#__PURE__*/React.createElement("th", null, "Total due"), /*#__PURE__*/React.createElement("th", null, "Invoices"), /*#__PURE__*/React.createElement("th", null, "Collect payment"))), /*#__PURE__*/React.createElement("tbody", null, filtered.map(row => /*#__PURE__*/React.createElement("tr", {
-    key: row.custId || row.mobile
+    key: row.key
   }, /*#__PURE__*/React.createElement("td", null, row.shopName), /*#__PURE__*/React.createElement("td", null, row.mobile), /*#__PURE__*/React.createElement("td", {
     className: "tabular",
     style: {
@@ -2076,7 +2206,7 @@ function CustomerDuePage({
     style: {
       minWidth: 220
     }
-  }, collectingId === (row.custId || row.mobile) ? /*#__PURE__*/React.createElement("div", {
+  }, collectingId === row.key ? /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,
@@ -2115,7 +2245,7 @@ function CustomerDuePage({
       padding: '6px 10px'
     },
     onClick: () => {
-      setCollectingId(row.custId || row.mobile);
+      setCollectingId(row.key);
       setAmount('');
     }
   }, "Collect payment")))))))));
@@ -2447,6 +2577,7 @@ function ReportPage({
   const todayStr = todayISO();
   const currentYear = Number(todayStr.slice(0, 4));
   const currentMonth = todayStr.slice(0, 7);
+  const [dailyDate, setDailyDate] = useState(todayStr);
   const [weekStart, setWeekStart] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 6);
@@ -2471,7 +2602,7 @@ function ReportPage({
   const inRange = dateStr => {
     if (!dateStr) return false;
     const ds = String(dateStr).slice(0, 10);
-    if (period === 'daily') return ds === todayStr;
+    if (period === 'daily') return ds === dailyDate;
     if (period === 'weekly') return ds >= weekStart && ds <= weekEnd;
     if (period === 'monthly') return ds.slice(0, 7) === monthValue;
     if (period === 'yearly') return ds.slice(0, 4) === yearValue;
@@ -2513,7 +2644,7 @@ function ReportPage({
   const monthYear = Number(monthValue.slice(0, 4));
   const monthNum = Number(monthValue.slice(5, 7));
   const periodLabel = (() => {
-    if (period === 'daily') return 'Daily — ' + fmtDate(todayStr);
+    if (period === 'daily') return 'Daily — ' + fmtDate(dailyDate);
     if (period === 'weekly') return 'Weekly — ' + fmtDate(weekStart) + ' to ' + fmtDate(weekEnd);
     if (period === 'monthly') return 'Monthly — ' + (monthNames[monthNum - 1] || '') + ' ' + monthYear;
     if (period === 'yearly') return 'Yearly — ' + yearValue;
@@ -2532,7 +2663,22 @@ function ReportPage({
     key: id,
     onClick: () => setPeriod(id),
     className: period === id ? 'primary' : 'ghost'
-  }, label))), period === 'weekly' && /*#__PURE__*/React.createElement("div", {
+  }, label))), period === 'daily' && /*#__PURE__*/React.createElement("div", {
+    className: "card no-print",
+    style: {
+      marginBottom: 14,
+      display: 'flex',
+      gap: 14,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Select date"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: dailyDate,
+    onChange: e => setDailyDate(e.target.value)
+  }))), period === 'weekly' && /*#__PURE__*/React.createElement("div", {
     className: "card no-print",
     style: {
       marginBottom: 14,
