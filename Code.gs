@@ -1,6 +1,6 @@
 const SHEETS = {
   Admin: ["name","mobile","address","password"],
-  Products: ["id","name","category","company","purchasePrice","salesPrice","stock"],
+  Products: ["id","name","category","company","colour","picture","purchasePrice","salesPrice","stock"],
   Customers: ["id","name","mobile","shopName","address"],
   Invoices: ["id","no","date","custId","shopName","mobile","address","itemsJSON","subtotal","discount","total","paid","due","status"],
   Purchases: ["id","date","productId","name","category","company","purchasePrice","salesPrice","qty"],
