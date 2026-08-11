@@ -1,9 +1,9 @@
 const SHEETS = {
-  Admin: ["name","mobile","address","password"],
-  Products: ["id","name","category","company","colour","picture","purchasePrice","salesPrice","stock"],
+  Admin: ["name","mobile","address","password","customerPassword"],
+  Products: ["id","name","category","company","colour","picture","purchasePrice","wholesalePrice","stock","retailPrice"],
   Customers: ["id","name","mobile","shopName","address"],
   Invoices: ["id","no","date","custId","shopName","mobile","address","itemsJSON","subtotal","discount","total","paid","due","status"],
-  Purchases: ["id","date","productId","name","category","company","purchasePrice","salesPrice","qty"],
+  Purchases: ["id","date","productId","name","category","company","purchasePrice","wholesalePrice","qty"],
   Expenses: ["id","title","amount","date","note"]
 };
 
@@ -12,10 +12,11 @@ function ensureSheets() {
   Object.keys(SHEETS).forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh) sh = ss.insertSheet(name);
-    if (sh.getLastRow() === 0) {
-      sh.getRange(1,1,1,SHEETS[name].length).setValues([SHEETS[name]]);
-      sh.setFrozenRows(1);
-    }
+    const headers = SHEETS[name];
+    // Always keep the header row in sync with the schema (safe: only overwrites row 1,
+    // never touches existing data rows). This means new columns auto-create themselves.
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
   });
   const def = ss.getSheetByName("Sheet1");
   if (def && ss.getSheets().length > 1) ss.deleteSheet(def);
@@ -59,8 +60,8 @@ function getSheetData(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(name);
   if (!sh || sh.getLastRow() < 2) return [];
-  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
-  const rows = sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).getValues();
+  const headers = SHEETS[name];
+  const rows = sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues();
   return rows.map(row => {
     const obj = {};
     headers.forEach((h,i) => {
@@ -71,6 +72,9 @@ function getSheetData(name) {
       }
     });
     return obj;
+  }).filter(obj => {
+    // skip fully blank rows (e.g. leftover empty rows)
+    return Object.values(obj).some(v => v !== "" && v !== undefined && v !== null && !(Array.isArray(v) && v.length===0));
   });
 }
 
@@ -90,11 +94,11 @@ function saveSheetData(name, rows) {
 function getAdmin() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName("Admin");
+  const headers = SHEETS.Admin;
   if (sh.getLastRow() < 2) {
-    sh.getRange(2,1,1,4).setValues([["Admin","","","1234"]]);
+    sh.getRange(2,1,1,headers.length).setValues([["Admin","","","1234",""]]);
   }
-  const headers = sh.getRange(1,1,1,4).getValues()[0];
-  const row = sh.getRange(2,1,1,4).getValues()[0];
+  const row = sh.getRange(2,1,1,headers.length).getValues()[0];
   const obj = {};
   headers.forEach((h,i) => obj[h] = row[i]);
   return obj;
@@ -104,8 +108,8 @@ function saveAdmin(data) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName("Admin");
   const headers = SHEETS.Admin;
-  if (sh.getLastRow() < 2) sh.getRange(2,1,1,4).setValues([["","","",""]]);
-  sh.getRange(2,1,1,4).setValues([headers.map(h => data[h] !== undefined ? data[h] : "")]);
+  if (sh.getLastRow() < 2) sh.getRange(2,1,1,headers.length).setValues([headers.map(()=>"")]);
+  sh.getRange(2,1,1,headers.length).setValues([headers.map(h => data[h] !== undefined ? data[h] : "")]);
 }
 
 function json(obj) {

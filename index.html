@@ -704,39 +704,65 @@ const NAV = [{
 }];
 
 /* ================= APP ================= */
+const CACHE_KEY = 'invoiceAppCache_v1';
+function loadCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function saveCache(data) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+  } catch (e) {/* ignore quota errors */}
+}
 function App() {
-  const [loading, setLoading] = useState(true);
+  const cached = loadCache();
+  const [loading, setLoading] = useState(!cached);
   const [loadError, setLoadError] = useState('');
-  const [admin, setAdmin] = useState(null);
+  const [admin, setAdmin] = useState(cached?.admin || null);
   const [authed, setAuthed] = useState(false);
+  const [role, setRole] = useState(null); // 'admin' | 'customer'
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [products, setProducts] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-  const [expenses, setExpenses] = useState([]);
+  const [products, setProducts] = useState((cached?.products || []).map(normalizeProduct));
+  const [customers, setCustomers] = useState(cached?.customers || []);
+  const [invoices, setInvoices] = useState((cached?.invoices || []).map(normalizeInvoice));
+  const [purchases, setPurchases] = useState(cached?.purchases || []);
+  const [expenses, setExpenses] = useState(cached?.expenses || []);
   const loadAll = useCallback(async () => {
-    setLoading(true);
+    if (!cached) setLoading(true);
     setLoadError('');
     try {
       const data = await apiGetAll();
       if (data.error) throw new Error(data.error);
-      setAdmin(data.admin || {
+      const nextAdmin = data.admin || {
         name: 'Admin',
         mobile: '',
         address: '',
-        password: '1234'
-      });
+        password: '1234',
+        customerPassword: ''
+      };
+      setAdmin(nextAdmin);
       setProducts((data.products || []).map(normalizeProduct));
       setCustomers(data.customers || []);
       setInvoices((data.invoices || []).map(normalizeInvoice));
       setPurchases(data.purchases || []);
       setExpenses(data.expenses || []);
+      saveCache({
+        admin: nextAdmin,
+        products: data.products || [],
+        customers: data.customers || [],
+        invoices: data.invoices || [],
+        purchases: data.purchases || [],
+        expenses: data.expenses || []
+      });
     } catch (err) {
       console.error(err);
-      setLoadError('Could not connect to the Google Sheet backend. Check the API URL and your internet connection, then retry.');
+      if (!cached) setLoadError('Could not connect to the Google Sheet backend. Check the API URL and your internet connection, then retry.');
     }
     setLoading(false);
   }, []);
@@ -747,7 +773,8 @@ function App() {
     return {
       ...p,
       purchasePrice: Number(p.purchasePrice) || 0,
-      salesPrice: Number(p.salesPrice) || 0,
+      wholesalePrice: Number(p.wholesalePrice) || 0,
+      retailPrice: Number(p.retailPrice) || 0,
       stock: Number(p.stock) || 0
     };
   }
@@ -796,6 +823,19 @@ function App() {
       await apiSaveAdmin(v);
     })
   };
+  if (!authed) {
+    return /*#__PURE__*/React.createElement(Login, {
+      admin: admin,
+      loading: loading,
+      loadError: loadError,
+      onRetry: loadAll,
+      onSuccess: r => {
+        setRole(r);
+        setAuthed(true);
+        setPage(r === 'customer' ? 'products' : 'dashboard');
+      }
+    });
+  }
   if (loading) {
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -837,12 +877,6 @@ function App() {
       onClick: loadAll
     }, "Retry"));
   }
-  if (!authed) {
-    return /*#__PURE__*/React.createElement(Login, {
-      admin: admin,
-      onSuccess: () => setAuthed(true)
-    });
-  }
   const ctx = {
     products,
     customers,
@@ -850,19 +884,26 @@ function App() {
     purchases,
     expenses,
     admin,
-    persist
+    persist,
+    role
   };
+  const customerAllowedPages = ['invoice', 'products'];
+  const effectivePage = role === 'customer' && !customerAllowedPages.includes(page) ? 'products' : page;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       minHeight: '100vh'
     }
   }, /*#__PURE__*/React.createElement(Sidebar, {
-    page: page,
+    page: effectivePage,
     setPage: setPage,
     open: sidebarOpen,
     setOpen: setSidebarOpen,
-    onLogout: () => setAuthed(false)
+    onLogout: () => {
+      setAuthed(false);
+      setRole(null);
+    },
+    role: role
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
@@ -870,35 +911,51 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement(TopBar, {
     admin: admin,
-    page: page,
+    page: effectivePage,
     onMenu: () => setSidebarOpen(true),
     syncing: syncing,
-    onRefresh: loadAll
+    onRefresh: loadAll,
+    role: role
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '20px 20px 60px',
       maxWidth: 1200,
       margin: '0 auto'
     }
-  }, page === 'dashboard' && /*#__PURE__*/React.createElement(Dashboard, {
+  }, effectivePage === 'dashboard' && role === 'admin' && /*#__PURE__*/React.createElement(Dashboard, {
     ...ctx,
     goTo: setPage
-  }), page === 'invoice' && /*#__PURE__*/React.createElement(InvoicePage, ctx), page === 'products' && /*#__PURE__*/React.createElement(ProductsPage, ctx), page === 'purchase' && /*#__PURE__*/React.createElement(PurchasePage, ctx), page === 'delivery' && /*#__PURE__*/React.createElement(DeliveryPage, ctx), page === 'customers' && /*#__PURE__*/React.createElement(CustomersPage, ctx), page === 'expenses' && /*#__PURE__*/React.createElement(ExpensesPage, ctx), page === 'report' && /*#__PURE__*/React.createElement(ReportPage, ctx), page === 'admin' && /*#__PURE__*/React.createElement(AdminPage, ctx))));
+  }), effectivePage === 'invoice' && /*#__PURE__*/React.createElement(InvoicePage, ctx), effectivePage === 'products' && /*#__PURE__*/React.createElement(ProductsPage, ctx), effectivePage === 'purchase' && role === 'admin' && /*#__PURE__*/React.createElement(PurchasePage, ctx), effectivePage === 'delivery' && role === 'admin' && /*#__PURE__*/React.createElement(DeliveryPage, ctx), effectivePage === 'customers' && role === 'admin' && /*#__PURE__*/React.createElement(CustomersPage, ctx), effectivePage === 'expenses' && role === 'admin' && /*#__PURE__*/React.createElement(ExpensesPage, ctx), effectivePage === 'report' && role === 'admin' && /*#__PURE__*/React.createElement(ReportPage, ctx), effectivePage === 'admin' && role === 'admin' && /*#__PURE__*/React.createElement(AdminPage, ctx))));
 }
 
 /* ---------- Login ---------- */
 function Login({
   admin,
+  loading,
+  loadError,
+  onRetry,
   onSuccess
 }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const submit = e => {
     e.preventDefault();
-    const storedPw = String(admin?.password ?? '1234').trim();
-    if (pw.trim() === storedPw) {
-      onSuccess();
-    } else setErr('Incorrect password. Please try again.');
+    if (!admin) {
+      setErr(loadError ? 'Still connecting to the server. Tap Retry below, then try logging in again.' : 'Still connecting, please wait a second and try again.');
+      return;
+    }
+    const entered = pw.trim();
+    const adminPw = String(admin?.password ?? '1234').trim();
+    const customerPw = String(admin?.customerPassword ?? '').trim();
+    if (entered === adminPw) {
+      onSuccess('admin');
+      return;
+    }
+    if (customerPw && entered === customerPw) {
+      onSuccess('customer');
+      return;
+    }
+    setErr('Incorrect password. Please try again.');
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -973,7 +1030,28 @@ function Login({
       fontSize: 13,
       marginTop: 8
     }
-  }, err), /*#__PURE__*/React.createElement("button", {
+  }, err), !admin && !err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--muted)',
+      fontSize: 12.5,
+      marginTop: 8,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "refresh",
+    size: 12
+  }), " Connecting…"), loadError && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "ghost",
+    onClick: onRetry,
+    style: {
+      width: '100%',
+      marginTop: 8,
+      fontSize: 13
+    }
+  }, "Retry connection"), /*#__PURE__*/React.createElement("button", {
     type: "submit",
     className: "primary",
     style: {
@@ -989,8 +1067,10 @@ function Sidebar({
   setPage,
   open,
   setOpen,
-  onLogout
+  onLogout,
+  role
 }) {
+  const navItems = role === 'customer' ? NAV.filter(n => ['invoice', 'products'].includes(n.id)) : NAV;
   return /*#__PURE__*/React.createElement(React.Fragment, null, open && /*#__PURE__*/React.createElement("div", {
     className: "no-print",
     onClick: () => setOpen(false),
@@ -1053,7 +1133,7 @@ function Sidebar({
       padding: '6px 10px',
       overflowY: 'auto'
     }
-  }, NAV.map(n => /*#__PURE__*/React.createElement("div", {
+  }, navItems.map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     onClick: () => {
       setPage(n.id);
@@ -1380,7 +1460,8 @@ function Empty({
 /* ================= PRODUCTS ================= */
 function ProductsPage({
   products,
-  persist
+  persist,
+  role
 }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blank());
@@ -1396,7 +1477,8 @@ function ProductsPage({
       colour: '',
       picture: '',
       purchasePrice: '',
-      salesPrice: '',
+      wholesalePrice: '',
+      retailPrice: '',
       stock: ''
     };
   }
@@ -1467,7 +1549,8 @@ function ProductsPage({
       colour: p.colour || '',
       picture: p.picture || '',
       purchasePrice: p.purchasePrice,
-      salesPrice: p.salesPrice,
+      wholesalePrice: p.wholesalePrice,
+      retailPrice: p.retailPrice,
       stock: p.stock
     });
     setEditingId(p.id);
@@ -1653,12 +1736,7 @@ function ProductsPage({
       company: e.target.value
     }),
     placeholder: "e.g. Pran"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement(Field, {
+  })), role === 'admin' && /*#__PURE__*/React.createElement(Field, {
     label: "Purchase price"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
@@ -1668,14 +1746,29 @@ function ProductsPage({
       purchasePrice: e.target.value
     }),
     placeholder: "৳"
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Sales price"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Wholesale price"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
-    value: form.salesPrice,
+    value: form.wholesalePrice,
     onChange: e => setForm({
       ...form,
-      salesPrice: e.target.value
+      wholesalePrice: e.target.value
+    }),
+    placeholder: "৳"
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Retail price"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    value: form.retailPrice,
+    onChange: e => setForm({
+      ...form,
+      retailPrice: e.target.value
     }),
     placeholder: "৳"
   }))), /*#__PURE__*/React.createElement(Field, {
@@ -1831,22 +1924,22 @@ function ProductsPage({
       color: 'var(--muted)',
       fontSize: 11.5
     }
-  }, "Purchase"), /*#__PURE__*/React.createElement("div", {
+  }, "Wholesale"), /*#__PURE__*/React.createElement("div", {
     className: "tabular",
     style: {
       fontWeight: 600
     }
-  }, money(p.purchasePrice))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, money(p.wholesalePrice))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       color: 'var(--muted)',
       fontSize: 11.5
     }
-  }, "Sales"), /*#__PURE__*/React.createElement("div", {
+  }, "Retail"), /*#__PURE__*/React.createElement("div", {
     className: "tabular",
     style: {
       fontWeight: 600
     }
-  }, money(p.salesPrice))), /*#__PURE__*/React.createElement("div", {
+  }, money(p.retailPrice))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
@@ -1932,7 +2025,7 @@ function PurchasePage({
       company: '',
       colour: '',
       purchasePrice: '',
-      salesPrice: '',
+      wholesalePrice: '',
       qty: ''
     };
   }
@@ -1961,7 +2054,7 @@ function PurchasePage({
       company: p.company,
       colour: p.colour || '',
       purchasePrice: p.purchasePrice,
-      salesPrice: p.salesPrice
+      wholesalePrice: p.wholesalePrice
     });else setForm({
       ...form,
       productId: id
@@ -1977,7 +2070,7 @@ function PurchasePage({
         ...p,
         colour: form.colour,
         purchasePrice: form.purchasePrice,
-        salesPrice: form.salesPrice,
+        wholesalePrice: form.wholesalePrice,
         stock: Number(p.stock || 0) + qty
       } : p);
     } else {
@@ -1989,7 +2082,8 @@ function PurchasePage({
         company: form.company,
         colour: form.colour,
         purchasePrice: form.purchasePrice,
-        salesPrice: form.salesPrice,
+        wholesalePrice: form.wholesalePrice,
+        retailPrice: '',
         stock: qty
       });
     }
@@ -2002,7 +2096,7 @@ function PurchasePage({
       category: form.category,
       company: form.company,
       purchasePrice: form.purchasePrice,
-      salesPrice: form.salesPrice,
+      wholesalePrice: form.wholesalePrice,
       qty
     };
     await persist.purchases([...purchases, record]);
@@ -2132,13 +2226,13 @@ function PurchasePage({
       purchasePrice: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: "Sales price"
+    label: "Wholesale price"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
-    value: form.salesPrice,
+    value: form.wholesalePrice,
     onChange: e => setForm({
       ...form,
-      salesPrice: e.target.value
+      wholesalePrice: e.target.value
     })
   }))), /*#__PURE__*/React.createElement(Field, {
     label: "Quantity (added to stock) *"
@@ -2849,7 +2943,12 @@ function AdminPage({
     next: '',
     confirm: ''
   });
+  const [custPwForm, setCustPwForm] = useState({
+    next: '',
+    confirm: ''
+  });
   const [msg, setMsg] = useState('');
+  const [custMsg, setCustMsg] = useState('');
   const saveInfo = async () => {
     await persist.admin({
       ...admin,
@@ -2872,6 +2971,27 @@ function AdminPage({
       confirm: ''
     });
     alert('Password changed.');
+  };
+  const saveCustomerPw = async () => {
+    if (!custPwForm.next || custPwForm.next.length < 4) return alert('Customer password must be at least 4 characters.');
+    if (custPwForm.next !== custPwForm.confirm) return alert('Passwords do not match.');
+    await persist.admin({
+      ...admin,
+      customerPassword: custPwForm.next
+    });
+    setCustPwForm({
+      next: '',
+      confirm: ''
+    });
+    setCustMsg('Customer password saved.');
+    setTimeout(() => setCustMsg(''), 2500);
+  };
+  const removeCustomerPw = async () => {
+    if (!confirm('Disable customer login? Customers will not be able to log in until a new password is set.')) return;
+    await persist.admin({
+      ...admin,
+      customerPassword: ''
+    });
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2935,7 +3055,7 @@ function AdminPage({
       marginTop: 0,
       fontSize: 15
     }
-  }, "Change password"), /*#__PURE__*/React.createElement(Field, {
+  }, "Change admin password"), /*#__PURE__*/React.createElement(Field, {
     label: "Current password"
   }, /*#__PURE__*/React.createElement("input", {
     type: "password",
@@ -2965,7 +3085,77 @@ function AdminPage({
   })), /*#__PURE__*/React.createElement("button", {
     className: "accent",
     onClick: changePw
-  }, "Change password")));
+  }, "Change password")), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      flex: '1 1 320px',
+      minWidth: 280
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      marginTop: 0,
+      fontSize: 15
+    }
+  }, "Customer login password"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--muted)',
+      marginTop: -6,
+      marginBottom: 12
+    }
+  }, "Customers who log in with this password will only see the Products and Invoice menus."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      marginBottom: 10
+    }
+  }, "Current status: ", admin.customerPassword ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--accent)',
+      fontWeight: 600
+    }
+  }, "Enabled") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--muted)'
+    }
+  }, "Not set")), /*#__PURE__*/React.createElement(Field, {
+    label: "New customer password"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: custPwForm.next,
+    onChange: e => setCustPwForm({
+      ...custPwForm,
+      next: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Confirm customer password"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: custPwForm.confirm,
+    onChange: e => setCustPwForm({
+      ...custPwForm,
+      confirm: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "accent",
+    onClick: saveCustomerPw,
+    style: {
+      flex: 1
+    }
+  }, "Save"), admin.customerPassword && /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    onClick: removeCustomerPw
+  }, "Disable")), custMsg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent)',
+      fontSize: 13,
+      marginTop: 8
+    }
+  }, custMsg)));
 }
 
 /* ================= REPORT ================= */
@@ -3568,12 +3758,32 @@ function InvoiceForm({
       name: p.name,
       category: p.category,
       colour: p.colour || '',
-      price: Number(p.salesPrice || 0)
+      price: Number(p.wholesalePrice || 0)
     });
   };
   const subtotal = items.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 0), 0);
   const total = Math.max(0, subtotal - Number(discount || 0));
   const due = Math.max(0, total - Number(paid || 0));
+  const stockIssues = useMemo(() => {
+    const totals = {};
+    items.forEach(it => {
+      if (!it.productId) return;
+      totals[it.productId] = (totals[it.productId] || 0) + Number(it.qty || 0);
+    });
+    const issues = {};
+    Object.keys(totals).forEach(pid => {
+      const p = products.find(x => x.id === pid);
+      if (p && totals[pid] > Number(p.stock || 0)) {
+        issues[pid] = {
+          available: Number(p.stock || 0),
+          requested: totals[pid],
+          name: p.name
+        };
+      }
+    });
+    return issues;
+  }, [items, products]);
+  const hasStockIssues = Object.keys(stockIssues).length > 0;
   const save = async () => {
     let shopName = '',
       mobile = '',
@@ -3600,6 +3810,10 @@ function InvoiceForm({
       address = newCust.address;
     }
     if (items.length === 0 || items.some(it => !it.name)) return alert('Add at least one product.');
+    if (hasStockIssues) {
+      const msgs = Object.values(stockIssues).map(i => `${i.name}: only ${i.available} in stock, but ${i.requested} requested`).join('\n');
+      return alert('Not enough stock to complete this invoice:\n\n' + msgs);
+    }
     let updatedProducts = [...products];
     items.forEach(it => {
       if (it.productId) {
@@ -3773,61 +3987,74 @@ function InvoiceForm({
     text: "Add a product to get started."
   }) : /*#__PURE__*/React.createElement("div", {
     className: "scrollx"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sl no."), /*#__PURE__*/React.createElement("th", null, "Product"), /*#__PURE__*/React.createElement("th", null, "Category"), /*#__PURE__*/React.createElement("th", null, "Colour"), /*#__PURE__*/React.createElement("th", null, "Price"), /*#__PURE__*/React.createElement("th", null, "Qty"), /*#__PURE__*/React.createElement("th", null, "Amount"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, items.map((it, idx) => /*#__PURE__*/React.createElement("tr", {
-    key: it.rowId
-  }, /*#__PURE__*/React.createElement("td", null, idx + 1), /*#__PURE__*/React.createElement("td", {
-    style: {
-      minWidth: 160
-    }
-  }, /*#__PURE__*/React.createElement("select", {
-    value: it.productId,
-    onChange: e => pickProduct(it.rowId, e.target.value)
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "-- Select --"), products.map(p => /*#__PURE__*/React.createElement("option", {
-    key: p.id,
-    value: p.id
-  }, p.name)))), /*#__PURE__*/React.createElement("td", null, it.category), /*#__PURE__*/React.createElement("td", {
-    style: {
-      minWidth: 110
-    }
-  }, /*#__PURE__*/React.createElement("select", {
-    value: it.colour || '',
-    onChange: e => updateItem(it.rowId, {
-      colour: e.target.value
-    })
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "--"), allColours.map(c => /*#__PURE__*/React.createElement("option", {
-    key: c,
-    value: c
-  }, c)), it.colour && !allColours.includes(it.colour) && /*#__PURE__*/React.createElement("option", {
-    value: it.colour
-  }, it.colour))), /*#__PURE__*/React.createElement("td", {
-    className: "tabular"
-  }, money(it.price)), /*#__PURE__*/React.createElement("td", {
-    style: {
-      maxWidth: 80
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "1",
-    value: it.qty,
-    onChange: e => updateItem(it.rowId, {
-      qty: e.target.value
-    })
-  })), /*#__PURE__*/React.createElement("td", {
-    className: "tabular"
-  }, money(Number(it.price || 0) * Number(it.qty || 0))), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
-    className: "ghost",
-    style: {
-      padding: '5px 8px'
-    },
-    onClick: () => removeItem(it.rowId)
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "trash",
-    size: 13
-  }))))))))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sl no."), /*#__PURE__*/React.createElement("th", null, "Product"), /*#__PURE__*/React.createElement("th", null, "Category"), /*#__PURE__*/React.createElement("th", null, "Colour"), /*#__PURE__*/React.createElement("th", null, "Price"), /*#__PURE__*/React.createElement("th", null, "Qty"), /*#__PURE__*/React.createElement("th", null, "Amount"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, items.map((it, idx) => {
+    const rowProduct = products.find(p => p.id === it.productId);
+    const issue = it.productId ? stockIssues[it.productId] : null;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: it.rowId
+    }, /*#__PURE__*/React.createElement("td", null, idx + 1), /*#__PURE__*/React.createElement("td", {
+      style: {
+        minWidth: 160
+      }
+    }, /*#__PURE__*/React.createElement("select", {
+      value: it.productId,
+      onChange: e => pickProduct(it.rowId, e.target.value)
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "-- Select --"), products.map(p => /*#__PURE__*/React.createElement("option", {
+      key: p.id,
+      value: p.id
+    }, p.name)))), /*#__PURE__*/React.createElement("td", null, it.category), /*#__PURE__*/React.createElement("td", {
+      style: {
+        minWidth: 110
+      }
+    }, /*#__PURE__*/React.createElement("select", {
+      value: it.colour || '',
+      onChange: e => updateItem(it.rowId, {
+        colour: e.target.value
+      })
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "--"), allColours.map(c => /*#__PURE__*/React.createElement("option", {
+      key: c,
+      value: c
+    }, c)), it.colour && !allColours.includes(it.colour) && /*#__PURE__*/React.createElement("option", {
+      value: it.colour
+    }, it.colour))), /*#__PURE__*/React.createElement("td", {
+      className: "tabular"
+    }, money(it.price)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        maxWidth: 100
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      min: "1",
+      value: it.qty,
+      onChange: e => updateItem(it.rowId, {
+        qty: e.target.value
+      }),
+      style: issue ? {
+        borderColor: 'var(--danger)'
+      } : undefined
+    }), rowProduct && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        marginTop: 3,
+        color: issue ? 'var(--danger)' : 'var(--muted)'
+      }
+    }, issue ? `Only ${issue.available} in stock` : `In stock: ${rowProduct.stock}`)), /*#__PURE__*/React.createElement("td", {
+      className: "tabular"
+    }, money(Number(it.price || 0) * Number(it.qty || 0))), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+      className: "ghost",
+      style: {
+        padding: '5px 8px'
+      },
+      onClick: () => removeItem(it.rowId)
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "trash",
+      size: 13
+    }))));
+  }))))), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       maxWidth: 380,
@@ -3885,9 +4112,16 @@ function InvoiceForm({
     value: money(due),
     bold: true,
     color: due > 0 ? 'var(--danger)' : 'var(--accent)'
-  }), /*#__PURE__*/React.createElement("button", {
+  }), hasStockIssues && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--danger)',
+      fontSize: 12.5,
+      marginTop: 8
+    }
+  }, "Some items exceed available stock. Reduce the quantity to continue."), /*#__PURE__*/React.createElement("button", {
     className: "primary",
     onClick: save,
+    disabled: hasStockIssues,
     style: {
       width: '100%',
       marginTop: 10
