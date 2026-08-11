@@ -86,6 +86,8 @@
   .badge.delivered{background:var(--accent-bg);color:var(--accent);}
   .badge.cancelled{background:var(--danger-bg);color:var(--danger);}
   .scrollx{overflow-x:auto;}
+  @keyframes spin{ from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+  .spin{ animation: spin 0.8s linear infinite; }
   .print-only{display:none;}
   @media print{
     body *{visibility:hidden;}
@@ -728,14 +730,16 @@ function App() {
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [products, setProducts] = useState((cached?.products || []).map(normalizeProduct));
   const [customers, setCustomers] = useState(cached?.customers || []);
   const [invoices, setInvoices] = useState((cached?.invoices || []).map(normalizeInvoice));
   const [purchases, setPurchases] = useState(cached?.purchases || []);
   const [expenses, setExpenses] = useState(cached?.expenses || []);
-  const loadAll = useCallback(async () => {
-    if (!cached) setLoading(true);
-    setLoadError('');
+  const [refreshError, setRefreshError] = useState('');
+  const loadAll = useCallback(async isInitial => {
+    if (isInitial && !cached) setLoading(true);
+    if (isInitial) setLoadError('');else setRefreshError('');
     try {
       const data = await apiGetAll();
       if (data.error) throw new Error(data.error);
@@ -762,13 +766,22 @@ function App() {
       });
     } catch (err) {
       console.error(err);
-      if (!cached) setLoadError('Could not connect to the Google Sheet backend. Check the API URL and your internet connection, then retry.');
+      if (isInitial) {
+        if (!cached) setLoadError('Could not connect to the Google Sheet backend. Check the API URL and your internet connection, then retry.');
+      } else {
+        setRefreshError('Refresh failed. Check your connection and try again.');
+      }
     }
-    setLoading(false);
+    if (isInitial) setLoading(false);
   }, []);
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    loadAll(true);
+  }, []);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadAll(false);
+    setRefreshing(false);
+  };
   function normalizeProduct(p) {
     return {
       ...p,
@@ -828,7 +841,7 @@ function App() {
       admin: admin,
       loading: loading,
       loadError: loadError,
-      onRetry: loadAll,
+      onRetry: () => loadAll(true),
       onSuccess: r => {
         setRole(r);
         setAuthed(true);
@@ -874,7 +887,7 @@ function App() {
       }
     }, loadError), /*#__PURE__*/React.createElement("button", {
       className: "primary",
-      onClick: loadAll
+      onClick: () => loadAll(true)
     }, "Retry"));
   }
   const ctx = {
@@ -914,7 +927,9 @@ function App() {
     page: effectivePage,
     onMenu: () => setSidebarOpen(true),
     syncing: syncing,
-    onRefresh: loadAll,
+    onRefresh: handleRefresh,
+    refreshing: refreshing,
+    refreshError: refreshError,
     role: role
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1185,7 +1200,9 @@ function TopBar({
   page,
   onMenu,
   syncing,
-  onRefresh
+  onRefresh,
+  refreshing,
+  refreshError
 }) {
   const label = NAV.find(n => n.id === page)?.label || '';
   return /*#__PURE__*/React.createElement("div", {
@@ -1241,17 +1258,36 @@ function TopBar({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "refresh",
     size: 13
-  }), "Syncing…"), /*#__PURE__*/React.createElement("button", {
+  }), "Syncing…"), refreshing && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--accent)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 5
+    }
+  }, "Refreshing…"), refreshError && !refreshing && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--danger)'
+    }
+  }, refreshError), /*#__PURE__*/React.createElement("button", {
     className: "ghost",
     onClick: onRefresh,
+    disabled: refreshing,
     title: "Refresh from Google Sheets",
     style: {
       padding: '6px 9px'
     }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: refreshing ? 'spin' : '',
+    style: {
+      display: 'inline-flex'
+    }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "refresh",
     size: 14
-  })), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13.5,
       color: 'var(--muted)',
