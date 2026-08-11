@@ -1576,13 +1576,13 @@ function ProductsPage({
     style: {
       maxWidth: 240
     }
-  }), /*#__PURE__*/React.createElement("button", {
+  }), role === 'admin' && /*#__PURE__*/React.createElement("button", {
     className: "primary",
     onClick: openNew
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
-  }), " Add new product")), showForm && /*#__PURE__*/React.createElement("div", {
+  }), " Add new product")), showForm && role === 'admin' && /*#__PURE__*/React.createElement("div", {
     className: "no-print",
     onClick: closeForm,
     style: {
@@ -1863,7 +1863,7 @@ function ProductsPage({
       fontSize: 14.5,
       lineHeight: 1.3
     }
-  }, p.name), /*#__PURE__*/React.createElement("div", {
+  }, p.name), role === 'admin' && /*#__PURE__*/React.createElement("div", {
     style: {
       whiteSpace: 'nowrap',
       flexShrink: 0
@@ -1917,9 +1917,20 @@ function ProductsPage({
       fontSize: 13,
       marginTop: 4,
       paddingTop: 8,
-      borderTop: '1px solid var(--line)'
+      borderTop: '1px solid var(--line)',
+      gap: 6
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, role === 'admin' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--muted)',
+      fontSize: 11.5
+    }
+  }, "Purchase"), /*#__PURE__*/React.createElement("div", {
+    className: "tabular",
+    style: {
+      fontWeight: 600
+    }
+  }, money(p.purchasePrice))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       color: 'var(--muted)',
       fontSize: 11.5
@@ -3634,21 +3645,56 @@ function InvoicePage({
   customers,
   invoices,
   persist,
-  admin
+  admin,
+  role
 }) {
   const [mode, setMode] = useState('list');
   const [activeInvoice, setActiveInvoice] = useState(null);
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const deleteInvoice = async inv => {
+    if (!confirm('Delete invoice ' + inv.no + '? This will restore the stock quantities.')) return;
+    const restockMap = {};
+    (inv.items || []).forEach(it => {
+      if (!it.productId) return;
+      restockMap[it.productId] = (restockMap[it.productId] || 0) + Number(it.qty || 0);
+    });
+    const updatedProducts = products.map(p => restockMap[p.id] ? {
+      ...p,
+      stock: Number(p.stock || 0) + restockMap[p.id]
+    } : p);
+    await persist.products(updatedProducts);
+    await persist.invoices(invoices.filter(i => i.id !== inv.id));
+  };
   if (mode === 'new') return /*#__PURE__*/React.createElement(InvoiceForm, {
     products: products,
     customers: customers,
     invoices: invoices,
     persist: persist,
     admin: admin,
+    role: role,
     onDone: inv => {
       setActiveInvoice(inv);
       setMode('view');
     },
     onCancel: () => setMode('list')
+  });
+  if (mode === 'edit' && editingInvoice) return /*#__PURE__*/React.createElement(InvoiceForm, {
+    products: products,
+    customers: customers,
+    invoices: invoices,
+    persist: persist,
+    admin: admin,
+    role: role,
+    editingInvoice: editingInvoice,
+    onDone: inv => {
+      setActiveInvoice(inv);
+      setEditingInvoice(null);
+      setMode('view');
+    },
+    onCancel: () => {
+      setEditingInvoice(null);
+      setMode('list');
+    }
   });
   if (mode === 'view' && activeInvoice) return /*#__PURE__*/React.createElement(InvoiceView, {
     invoice: activeInvoice,
@@ -3693,17 +3739,44 @@ function InvoicePage({
     }
   }, money(inv.due)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(StatusBadge, {
     status: inv.status
-  })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+  })), /*#__PURE__*/React.createElement("td", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
     className: "ghost",
     style: {
       fontSize: 12.5,
-      padding: '6px 10px'
+      padding: '6px 10px',
+      marginRight: 4
     },
     onClick: () => {
       setActiveInvoice(inv);
       setMode('view');
     }
-  }, "View")))))))));
+  }, "View"), role === 'admin' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    style: {
+      padding: '6px 8px',
+      marginRight: 4
+    },
+    onClick: () => {
+      setEditingInvoice(inv);
+      setMode('edit');
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "edit",
+    size: 13
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    style: {
+      padding: '6px 8px'
+    },
+    onClick: () => deleteInvoice(inv)
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "trash",
+    size: 13
+  })))))))))));
 }
 function InvoiceForm({
   products,
@@ -3711,21 +3784,52 @@ function InvoiceForm({
   invoices,
   persist,
   admin,
+  role,
+  editingInvoice,
   onDone,
   onCancel
 }) {
+  const isEditing = !!editingInvoice;
   const [custMode, setCustMode] = useState('select');
-  const [selectedCustId, setSelectedCustId] = useState('');
+  const [selectedCustId, setSelectedCustId] = useState(editingInvoice?.custId || '');
   const [newCust, setNewCust] = useState({
     name: '',
     mobile: '',
     shopName: '',
     address: ''
   });
-  const [items, setItems] = useState([]);
-  const [discount, setDiscount] = useState(0);
-  const [paid, setPaid] = useState(0);
+  const [items, setItems] = useState(() => {
+    if (editingInvoice) {
+      return (editingInvoice.items || []).map(it => ({
+        rowId: uid('row'),
+        productId: it.productId || '',
+        name: it.name || '',
+        category: it.category || '',
+        colour: it.colour || '',
+        price: Number(it.price || 0),
+        qty: Number(it.qty || 0)
+      }));
+    }
+    return [];
+  });
+  const [discount, setDiscount] = useState(editingInvoice ? Number(editingInvoice.discount || 0) : 0);
+  const [paid, setPaid] = useState(editingInvoice ? Number(editingInvoice.paid || 0) : 0);
   const selectedCust = customers.find(c => c.id === selectedCustId);
+
+  // When editing, treat this invoice's own original quantities as "returned" to stock,
+  // so validation compares new quantities against the true available stock (not double-counting).
+  const baselineProducts = useMemo(() => {
+    if (!isEditing) return products;
+    const restock = {};
+    (editingInvoice.items || []).forEach(it => {
+      if (!it.productId) return;
+      restock[it.productId] = (restock[it.productId] || 0) + Number(it.qty || 0);
+    });
+    return products.map(p => restock[p.id] ? {
+      ...p,
+      stock: Number(p.stock || 0) + restock[p.id]
+    } : p);
+  }, [products, isEditing, editingInvoice]);
   const allColours = useMemo(() => {
     const set = new Set();
     products.forEach(p => {
@@ -3772,7 +3876,7 @@ function InvoiceForm({
     });
     const issues = {};
     Object.keys(totals).forEach(pid => {
-      const p = products.find(x => x.id === pid);
+      const p = baselineProducts.find(x => x.id === pid);
       if (p && totals[pid] > Number(p.stock || 0)) {
         issues[pid] = {
           available: Number(p.stock || 0),
@@ -3782,14 +3886,19 @@ function InvoiceForm({
       }
     });
     return issues;
-  }, [items, products]);
+  }, [items, baselineProducts]);
   const hasStockIssues = Object.keys(stockIssues).length > 0;
   const save = async () => {
     let shopName = '',
       mobile = '',
       address = '',
       custId = '';
-    if (custMode === 'select') {
+    if (isEditing) {
+      shopName = editingInvoice.shopName;
+      mobile = editingInvoice.mobile;
+      address = editingInvoice.address;
+      custId = editingInvoice.custId;
+    } else if (custMode === 'select') {
       if (!selectedCust) return alert('Select a customer/shop, or add a new one.');
       shopName = selectedCust.shopName;
       mobile = selectedCust.mobile;
@@ -3814,16 +3923,37 @@ function InvoiceForm({
       const msgs = Object.values(stockIssues).map(i => `${i.name}: only ${i.available} in stock, but ${i.requested} requested`).join('\n');
       return alert('Not enough stock to complete this invoice:\n\n' + msgs);
     }
-    let updatedProducts = [...products];
-    items.forEach(it => {
-      if (it.productId) {
-        updatedProducts = updatedProducts.map(p => p.id === it.productId ? {
-          ...p,
-          stock: Math.max(0, Number(p.stock || 0) - Number(it.qty || 0))
-        } : p);
-      }
+    const updatedProducts = baselineProducts.map(p => {
+      const usedQty = items.filter(it => it.productId === p.id).reduce((s, it) => s + Number(it.qty || 0), 0);
+      return usedQty > 0 ? {
+        ...p,
+        stock: Math.max(0, Number(p.stock || 0) - usedQty)
+      } : p;
     });
     await persist.products(updatedProducts);
+    const newItems = items.map(it => ({
+      productId: it.productId,
+      name: it.name,
+      category: it.category,
+      colour: it.colour || '',
+      price: Number(it.price || 0),
+      qty: Number(it.qty || 0),
+      amount: Number(it.price || 0) * Number(it.qty || 0)
+    }));
+    if (isEditing) {
+      const updatedInvoice = {
+        ...editingInvoice,
+        items: newItems,
+        subtotal,
+        discount: Number(discount || 0),
+        total,
+        paid: Number(paid || 0),
+        due
+      };
+      await persist.invoices(invoices.map(i => i.id === editingInvoice.id ? updatedInvoice : i));
+      onDone(updatedInvoice);
+      return;
+    }
     const invNo = 'INV-' + String(invoices.length + 1).padStart(4, '0');
     const invoice = {
       id: uid('INV'),
@@ -3833,15 +3963,7 @@ function InvoiceForm({
       shopName,
       mobile,
       address,
-      items: items.map(it => ({
-        productId: it.productId,
-        name: it.name,
-        category: it.category,
-        colour: it.colour || '',
-        price: Number(it.price || 0),
-        qty: Number(it.qty || 0),
-        amount: Number(it.price || 0) * Number(it.qty || 0)
-      })),
+      items: newItems,
       subtotal,
       discount: Number(discount || 0),
       total,
@@ -3864,7 +3986,7 @@ function InvoiceForm({
       margin: 0,
       fontSize: 16
     }
-  }, "Create new invoice"), /*#__PURE__*/React.createElement("button", {
+  }, isEditing ? 'Edit invoice ' + editingInvoice.no : 'Create new invoice'), /*#__PURE__*/React.createElement("button", {
     className: "ghost",
     onClick: onCancel
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -3880,7 +4002,23 @@ function InvoiceForm({
       marginTop: 0,
       fontSize: 14.5
     }
-  }, "Customer info"), /*#__PURE__*/React.createElement("div", {
+  }, "Customer info"), isEditing ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: 'var(--muted)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      color: 'var(--text)',
+      fontSize: 14.5
+    }
+  }, editingInvoice.shopName), /*#__PURE__*/React.createElement("div", null, editingInvoice.mobile), /*#__PURE__*/React.createElement("div", null, editingInvoice.address), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, "(Customer cannot be changed while editing an invoice.)")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
@@ -3892,7 +4030,7 @@ function InvoiceForm({
     style: {
       fontSize: 13
     }
-  }, "Select from list"), /*#__PURE__*/React.createElement("button", {
+  }, "Select from list"), role !== 'customer' && /*#__PURE__*/React.createElement("button", {
     className: custMode === 'new' ? 'primary' : 'ghost',
     onClick: () => setCustMode('new'),
     style: {
@@ -3957,7 +4095,7 @@ function InvoiceForm({
       ...newCust,
       address: e.target.value
     })
-  })))), /*#__PURE__*/React.createElement("div", {
+  }))))), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginBottom: 16
